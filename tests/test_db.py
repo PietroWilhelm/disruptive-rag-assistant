@@ -46,3 +46,28 @@ def test_metadados(banco):
     assert banco.obter_metadado("indexado_em") is None
     banco.definir_metadado("indexado_em", "2026-10-06")
     assert banco.obter_metadado("indexado_em") == "2026-10-06"
+
+
+def test_exportar_e_importar_indice_nao_leva_sessoes(banco, tmp_path, monkeypatch):
+    import numpy as np
+
+    from app.business.schemas import Trecho
+
+    t = Trecho(fonte="a.md", titulo="A", secao="A", url="u", conteudo="conteúdo de teste do trecho")
+    banco.salvar_trecho("h1", t, np.array([1.0, 2.0]))
+    banco.definir_metadado("indexado_em", "hoje")
+    banco.criar_sessao()
+
+    semente = tmp_path / "seed" / "indice.db"
+    assert banco.exportar_indice(str(semente)) == 1
+
+    from app import config
+
+    monkeypatch.setattr(config, "DATABASE_PATH", str(tmp_path / "novo.db"))    # banco vazio, como num deploy novo
+    banco.inicializar_schema()
+    assert banco.contar_trechos() == 0
+    assert banco.importar_indice(str(semente)) == 1
+    assert banco.importar_indice(str(semente)) == 0         # de novo: nada duplicado
+    item = banco.carregar_indice()[0]
+    assert item.trecho.fonte == "a.md" and np.allclose(item.embedding, [1.0, 2.0])
+    assert banco.obter_metadado("indexado_em") == "hoje"

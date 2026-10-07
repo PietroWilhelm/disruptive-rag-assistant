@@ -11,6 +11,7 @@ import sqlite3
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 
@@ -197,3 +198,35 @@ def obter_metadado(chave: str) -> str | None:
     with closing(_conectar()) as conexao:
         linha = conexao.execute("SELECT valor FROM metadados WHERE chave = ?", (chave,)).fetchone()
     return linha["valor"] if linha else None
+
+
+_COLUNAS_TRECHO = "hash, fonte, titulo, secao, url, conteudo, embedding"
+
+
+def exportar_indice(destino: str) -> int:
+    """Grava em um arquivo SQLite novo só o índice (trechos + metadados): sem sessões nem mensagens."""
+    caminho = Path(destino)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.unlink(missing_ok=True)
+    with closing(sqlite3.connect(str(caminho))) as conexao:
+        conexao.executescript(_SCHEMA)
+        conexao.execute("ATTACH DATABASE ? AS origem", (config.caminho_absoluto_banco(),))
+        conexao.execute(f"INSERT INTO trechos ({_COLUNAS_TRECHO}) SELECT {_COLUNAS_TRECHO} FROM origem.trechos")
+        conexao.execute("INSERT INTO metadados (chave, valor) SELECT chave, valor FROM origem.metadados")
+        conexao.commit()
+        total = conexao.execute("SELECT COUNT(*) FROM trechos").fetchone()[0]
+        conexao.execute("DETACH DATABASE origem")
+        conexao.execute("VACUUM")
+    return total
+
+
+def importar_indice(origem: str) -> int:
+    """Copia para o banco atual os trechos do arquivo `origem` que ainda não existem (pelo hash)."""
+    with closing(_conectar()) as conexao:
+        conexao.execute("ATTACH DATABASE ? AS semente", (origem,))
+        with conexao:
+            cursor = conexao.execute(
+                f"INSERT OR IGNORE INTO trechos ({_COLUNAS_TRECHO}) SELECT {_COLUNAS_TRECHO} FROM semente.trechos"
+            )
+            conexao.execute("INSERT OR IGNORE INTO metadados (chave, valor) SELECT chave, valor FROM semente.metadados")
+        return cursor.rowcount

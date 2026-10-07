@@ -59,6 +59,10 @@ MATERIAL_EXCLUIR = _lista(_texto("MATERIAL_EXCLUIR", "*copy.*"))
 # Ritmo máximo de chamadas de embedding por minuto (camada gratuita: 100). 0 desliga o controle.
 EMBEDDING_RPM = int(_numero("EMBEDDING_RPM", 80))
 
+# Índice pronto (só trechos + embeddings) que acompanha o código: usado quando o banco está vazio,
+# para o deploy não precisar gastar a cota do Gemini reindexando. Gerado por `python -m scripts.criar_semente`.
+SEMENTE_PATH = _texto("SEMENTE_PATH", "seed/indice.db")
+
 # --- Recuperação ---
 TOP_K = int(_numero("TOP_K", 4))
 SIMILARIDADE_MINIMA = _numero("SIMILARIDADE_MINIMA", 0.40)
@@ -75,6 +79,14 @@ def caminho_absoluto_banco() -> str:
         caminho = BASE_DIR / caminho
     caminho.parent.mkdir(parents=True, exist_ok=True)
     return str(caminho)
+
+
+def caminho_da_semente() -> str:
+    """Caminho do índice pronto, ou texto vazio se o arquivo não existir."""
+    caminho = Path(SEMENTE_PATH)
+    if not caminho.is_absolute():
+        caminho = BASE_DIR / caminho
+    return str(caminho) if caminho.is_file() else ""
 
 
 def url_do_zip_do_material() -> str:

@@ -43,6 +43,10 @@ def _indexar_em_segundo_plano(app: FastAPI) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     db.inicializar_schema()
+    # Banco vazio (deploy novo): usa o índice pronto que acompanha o código, sem gastar cota da API.
+    semente = config.caminho_da_semente()
+    if semente and not db.contar_trechos():
+        db.importar_indice(semente)
     app.state.indice = db.carregar_indice()
     app.state.indexando = False
     app.state.erro_ingestao = ""

@@ -106,3 +106,20 @@ def test_cota_esgotada_vira_429_amigavel(cliente):
     sessao = _sessao(cliente)
     r = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "similaridade de cosseno"})
     assert r.status_code == 429 and "cota" in r.json()["detail"].lower()
+
+
+def test_banco_vazio_usa_o_indice_pronto_sem_chamar_a_api(ia, banco, material, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "MATERIAL_DIR", str(material))
+    ingestao.executar(progresso=lambda *_: None)
+    semente = tmp_path / "seed" / "indice.db"
+    total = banco.exportar_indice(str(semente))
+
+    monkeypatch.setattr(config, "DATABASE_PATH", str(tmp_path / "deploy-novo.db"))    # banco vazio
+    monkeypatch.setattr(config, "SEMENTE_PATH", str(semente))
+    monkeypatch.setattr(config, "AUTO_INGESTAO", True)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "chave-falsa")
+    docs_antes = ia.chamadas_documento
+    with TestClient(app) as c:
+        corpo = c.get("/api/health").json()
+    assert corpo["trechos"] == total and corpo["base_indexada"] and not corpo["indexando"]
+    assert ia.chamadas_documento == docs_antes                  # não reindexou nada

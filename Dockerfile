@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY frontend ./frontend
+COPY seed ./seed
 
 # /data guarda o SQLite (sessões + índice). No Railway, monte um Volume neste caminho.
 RUN useradd -m app && mkdir -p /data && chown -R app /srv /data

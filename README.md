@@ -66,6 +66,8 @@ disruptive-rag-assistant/
 │       └── limite.py           # limite de mensagens por minuto por IP
 ├── frontend/index.html         # UI de teste (vanilla JS)
 ├── scripts/avaliar_recuperacao.py
+├── scripts/criar_semente.py     # gera seed/indice.db (índice pronto para o deploy)
+├── seed/indice.db              # só trechos + embeddings; vai para o git
 ├── avaliacao/perguntas.json    # perguntas + fontes esperadas
 ├── tests/                      # testes: nenhum precisa de chave de API
 ├── data/                       # banco SQLite em tempo de execução (gitignored)
@@ -165,12 +167,24 @@ O `gemini-embedding-2` gratuito permite 100 requisições por minuto e 1.000 por
 
 ## Deploy no Railway
 
-1. Suba o projeto para um repositório seu no GitHub (o `.env` e `data/*.db` já estão no `.gitignore`).
-2. No Railway: **New Project → Deploy from GitHub repo**. Ele usa o `Dockerfile` e o `railway.json` (healthcheck em `/api/health`).
-3. Em **Variables**, defina `GEMINI_API_KEY`. Se quiser outro fork/branch, defina `MATERIAL_REPO` e `MATERIAL_BRANCH`.
-4. Crie um **Volume** montado em `/data` (o Dockerfile já define `DATABASE_PATH=/data/rag.db`). Sem volume o banco some a cada deploy e o app precisa reindexar. Se o app não conseguir gravar no volume, defina também `RAILWAY_RUN_UID=0`.
+A indexação gasta uma requisição de embedding por trecho (mais de 1.500 no site inteiro), mais do que a cota diária gratuita. Por isso o índice pronto vai junto com o código, em `seed/indice.db`, e o app o usa quando o banco está vazio: o deploy não reindexa nada.
+
+1. **Gere o índice pronto**, depois de indexar localmente (`python -m app.ingestao`):
+
+```bash
+python -m scripts.criar_semente
+```
+
+   Ele grava `seed/indice.db` com só os trechos e embeddings (sem sessões nem mensagens). Commite esse arquivo. Refaça e commite sempre que o site mudar e você reindexar.
+2. Suba o projeto para o seu repositório no GitHub (o `.env` e `data/*.db` já estão no `.gitignore`).
+3. No Railway: **New Project → Deploy from GitHub repo**. Ele usa o `Dockerfile` e o `railway.json` (healthcheck em `/api/health`).
+4. Em **Variables**, defina `GEMINI_API_KEY`, `AUTO_INGESTAO=false` (evita gastar cota se algo der errado com a semente), `SIMILARIDADE_MINIMA` com o valor que você calibrou e, se quiser, `GEMINI_MODEL`. Para outro fork/branch, `MATERIAL_REPO` e `MATERIAL_BRANCH`.
 5. **Settings → Networking → Generate Domain**.
-6. Na primeira subida, com o banco vazio e a chave configurada, o app indexa sozinho (`AUTO_INGESTAO=true`); acompanhe em `/api/health` (`indexando`, `trechos`, `erro_ingestao`). Quando o site mudar, rode a ingestão de novo dentro do serviço (`railway run python -m app.ingestao`) e reinicie o deploy para recarregar o índice.
+6. Abra `/api/health`: `trechos` deve mostrar o total do índice. Na primeira subida o app copia a semente para o banco.
+
+O Volume é opcional: ele só guarda o histórico das conversas entre deploys. Se quiser, monte-o em `/data` (o Dockerfile já define `DATABASE_PATH=/data/rag.db`; se o app não conseguir gravar, defina também `RAILWAY_RUN_UID=0`). Sem volume, o histórico se perde a cada deploy, mas o índice volta da semente.
+
+Quando o site mudar: `python -m app.ingestao`, depois `python -m scripts.criar_semente`, commit e push.
 
 ## Decisões técnicas
 
