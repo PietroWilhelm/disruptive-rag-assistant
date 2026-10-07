@@ -7,6 +7,7 @@ A API fica em /api/*, a documentação interativa em /docs, e o frontend de test
 (frontend/index.html) é servido na raiz "/".
 """
 
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,13 +15,29 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app import config
-from app.api import indexacao
+from app import config, ingestao
 from app.api.routers import router as api_router
 from app.persistence import db
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+
+
+def _indexar_em_segundo_plano(app: FastAPI) -> None:
+    """Baixa o material, gera os embeddings e recarrega o índice em memória (primeira subida)."""
+
+    def rodar() -> None:
+        try:
+            ingestao.executar()
+            app.state.indice = db.carregar_indice()
+            app.state.erro_ingestao = ""
+        except Exception as erro:  # noqa: BLE001 - qualquer falha vira status visível no /health
+            app.state.erro_ingestao = str(erro)
+        finally:
+            app.state.indexando = False
+
+    app.state.indexando = True
+    threading.Thread(target=rodar, daemon=True).start()
 
 
 @asynccontextmanager
@@ -31,7 +48,7 @@ async def _lifespan(app: FastAPI):
     app.state.erro_ingestao = ""
     # Primeira subida (ex.: deploy novo sem banco): indexa o material sozinho.
     if not app.state.indice and config.AUTO_INGESTAO and config.GEMINI_API_KEY:
-        indexacao.iniciar_reindexacao(app)
+        _indexar_em_segundo_plano(app)
     yield
 
 

@@ -14,11 +14,11 @@ Chat que responde dúvidas da disciplina **usando só o material do site** (`arn
 
 O Lab 3.5 pede três coisas: separar responsabilidades em módulos, ter uma API e persistir interações e logs. A decisão central do projeto é **separar a lógica de negócio da camada de LLM**, como no `petshop-assistant`: a lógica de negócio não depende do modelo de IA e roda igual com qualquer LLM, ou nenhum.
 
-- `app/business/` — Python puro: transformar arquivos em trechos, similaridade de cosseno, top-k, decidir se há contexto suficiente, montar o contexto, conferir as citações e o caso de uso `responder()`. **Zero import de `google-genai`**, banco ou FastAPI. Ela só declara *o que precisa* por meio de duas portas (`Embedder` e `Gerador`, em `portas.py`). Com `GeradorExtrativo` ela responde sem nenhuma IA.
-- `app/llm/` — tudo que fala com o Gemini: cliente com retry/backoff, *system prompt*, embeddings (`GeminiEmbedder`) e geração (`GeminiGerador`, via Interactions API). Estas classes **implementam** as portas da camada de negócio; a camada de negócio nunca importa nada daqui.
+- `app/business/` — Python puro: transformar arquivos em trechos, similaridade de cosseno, top-k, decidir se há contexto suficiente, montar o contexto e conferir as citações. **Zero import de `google-genai`**, banco ou FastAPI (um teste confere isso lendo os imports). São regras determinísticas, que rodam sem chave de API e dão o mesmo resultado com qualquer modelo.
+- `app/llm/` — tudo que fala com o Gemini: cliente com retry/backoff, *system prompt*, embeddings e `assistente.conversar()`, que monta o fluxo (busca -> há contexto? -> Interactions API -> fontes) chamando as regras de `app.business`. Quem usa a IA conhece a lógica de negócio; a lógica de negócio nunca importa nada daqui.
 - `app/persistence/` — SQLite simples, sem ORM: sessões, mensagens (com as fontes de cada resposta), o `interaction_id` da conversa e o índice (trechos + embeddings).
-- `app/api/` — a única camada que conhece HTTP. Um FastAPI fino: recebe a requisição, escolhe quem implementa as portas (`dependencias.py`), chama `business.rag.responder`, grava e devolve.
-- `app/ingestao.py` — baixa (ou lê de uma pasta) o material, usa `business.conhecimento` para segmentar e o `Embedder` para vetorizar.
+- `app/api/` — a única camada que conhece HTTP. Um FastAPI fino: recebe a requisição, chama `llm.assistente.conversar`, grava e devolve.
+- `app/ingestao.py` — baixa (ou lê de uma pasta) o material, usa `business.conhecimento` para segmentar e `llm.embeddings` para vetorizar.
 - `frontend/` — HTML/JS único, sem framework nem build, para testar na mão e demonstrar.
 
 Como a conversa e a base de conhecimento são coisas diferentes (Lab 4):
@@ -51,28 +51,23 @@ disruptive-rag-assistant/
 │   ├── ingestao.py             # material (.md/.ipynb) -> trechos -> embeddings -> SQLite
 │   ├── business/               # SEM IA, SEM banco, SEM HTTP
 │   │   ├── schemas.py          # Trecho, TrechoRecuperado, RespostaRag... (Pydantic)
-│   │   ├── portas.py           # Embedder e Gerador: o que a lógica exige de fora
 │   │   ├── conhecimento.py     # markdown/notebook -> seções -> trechos (+ URL e âncora no site)
 │   │   ├── busca.py            # similaridade_cosseno, buscar_trechos (Lab 4)
-│   │   ├── regras.py           # contexto suficiente?, montar_contexto, conferir citações
-│   │   ├── rag.py              # caso de uso: recuperar() e responder()
-│   │   └── extrativo.py        # gerador sem IA
+│   │   └── regras.py           # contexto suficiente?, montar_contexto, conferir citações
 │   ├── llm/                    # tudo que fala com o Gemini
 │   │   ├── client.py           # cliente lazy + retry/backoff (429/503)
 │   │   ├── prompts.py          # SYSTEM_PROMPT
-│   │   ├── embeddings.py       # GeminiEmbedder (implementa Embedder)
-│   │   └── assistente.py       # GeminiGerador (implementa Gerador)
+│   │   ├── embeddings.py       # embutir_pergunta / embutir_documento
+│   │   └── assistente.py       # conversar() e recuperar(): o fluxo do RAG
 │   ├── persistence/db.py       # schema SQLite + leitura/escrita
 │   └── api/
 │       ├── schemas.py          # request/response HTTP
 │       ├── routers.py          # rotas
-│       ├── dependencias.py     # escolhe as implementações das portas
-│       ├── indexacao.py        # indexação em segundo plano
 │       └── limite.py           # limite de mensagens por minuto por IP
 ├── frontend/index.html         # UI de teste (vanilla JS)
 ├── scripts/avaliar_recuperacao.py
 ├── avaliacao/perguntas.json    # perguntas + fontes esperadas
-├── tests/                      # 55 testes, nenhum precisa de chave de API
+├── tests/                      # testes: nenhum precisa de chave de API
 ├── data/                       # banco SQLite em tempo de execução (gitignored)
 ├── Dockerfile · railway.json · .env.example · .gitignore · requirements.txt
 ```
@@ -128,7 +123,7 @@ uvicorn app.main:app --reload
 pytest -v
 ```
 
-Todos rodam **sem chave de API e sem internet**: a camada de negócio é pura; a API é testada com `Embedder`/`Gerador` falsos injetados via `dependency_overrides`; os adaptadores do Gemini são testados com o SDK substituído. Há ainda um teste que lê o código e falha se `app/business/` importar IA, banco, HTTP ou outra camada, e outro que falha se algum arquivo usar `from __future__`.
+Todos rodam **sem chave de API e sem internet**: a camada de negócio é pura; a API e o fluxo do `assistente` são testados com as chamadas ao Gemini trocadas por fakes (`monkeypatch`, fixture `ia`); os detalhes do Gemini (prefixos de embedding, retry, cota) são testados com o SDK substituído. Há ainda um teste que lê o código e falha se `app/business/` importar IA, banco, HTTP ou outra camada, e outro que falha se algum arquivo usar `from __future__`.
 
 ## Endpoints da API
 
@@ -139,7 +134,6 @@ Todos rodam **sem chave de API e sem internet**: a camada de negócio é pura; a
 | `POST` | `/api/sessoes/{id}/mensagens` | Pergunta do aluno → resposta + fontes (com `citada`) + `fundamentada` |
 | `GET` | `/api/sessoes/{id}` | Histórico da conversa, com as fontes de cada resposta |
 | `POST` | `/api/buscar` | **Só a recuperação**, sem gerar resposta (para avaliar a busca) |
-| `POST` | `/api/admin/reindexar` | Reindexa o material em segundo plano (header `X-Admin-Token`) |
 
 ## Qualidade das respostas
 
@@ -159,18 +153,24 @@ python -m scripts.avaliar_recuperacao --respostas  # também confere citações 
 
 Ele imprime a similaridade do melhor trecho para perguntas dentro e fora do escopo: use isso para escolher o `SIMILARIDADE_MINIMA` (o padrão 0.40 é um ponto de partida, não um valor calibrado). Troque/amplie `avaliacao/perguntas.json` com perguntas reais da disciplina.
 
+## Limites da camada gratuita do Gemini
+
+O `gemini-embedding-2` gratuito permite 100 requisições por minuto e 1.000 por dia, e a indexação faz uma requisição por trecho. Por isso:
+
+- o cliente já respeita o ritmo (`EMBEDDING_RPM`, padrão 80) para não tomar 429 a cada minuto;
+- se a **cota diária** acabar, a ingestão para com uma mensagem clara, mantém tudo que já foi salvo e não apaga nada: rode de novo no dia seguinte e ela continua de onde parou;
+- `python -m app.ingestao --contar` mostra quantos trechos há por pasta e quantos embeddings ainda faltam, sem chamar a API;
+- `MATERIAL_INCLUIR` e `MATERIAL_EXCLUIR` limitam o que é indexado (ex.: `MATERIAL_INCLUIR=agenda,aulas/genAI,aulas/checkpoint`). Cópias como `x copy.md` já são ignoradas por padrão;
+- cada pergunta no chat gasta 1 embedding e 1 geração, então confira também os limites do modelo `gemini-3.5-flash` no AI Studio antes de divulgar o chat; para uso real, ative o faturamento.
+
 ## Deploy no Railway
 
 1. Suba o projeto para um repositório seu no GitHub (o `.env` e `data/*.db` já estão no `.gitignore`).
 2. No Railway: **New Project → Deploy from GitHub repo**. Ele usa o `Dockerfile` e o `railway.json` (healthcheck em `/api/health`).
-3. Em **Variables**, defina `GEMINI_API_KEY` e `ADMIN_TOKEN` (um segredo longo). Se quiser outro fork/branch, defina `MATERIAL_REPO` e `MATERIAL_BRANCH`.
+3. Em **Variables**, defina `GEMINI_API_KEY`. Se quiser outro fork/branch, defina `MATERIAL_REPO` e `MATERIAL_BRANCH`.
 4. Crie um **Volume** montado em `/data` (o Dockerfile já define `DATABASE_PATH=/data/rag.db`). Sem volume o banco some a cada deploy e o app precisa reindexar. Se o app não conseguir gravar no volume, defina também `RAILWAY_RUN_UID=0`.
 5. **Settings → Networking → Generate Domain**.
-6. Na primeira subida, com o banco vazio e a chave configurada, o app indexa sozinho (`AUTO_INGESTAO=true`); acompanhe em `/api/health` (`indexando`, `trechos`, `erro_ingestao`). Quando o site mudar:
-
-```bash
-curl -X POST https://SEU-APP.up.railway.app/api/admin/reindexar -H "X-Admin-Token: SEU_TOKEN"
-```
+6. Na primeira subida, com o banco vazio e a chave configurada, o app indexa sozinho (`AUTO_INGESTAO=true`); acompanhe em `/api/health` (`indexando`, `trechos`, `erro_ingestao`). Quando o site mudar, rode a ingestão de novo dentro do serviço (`railway run python -m app.ingestao`) e reinicie o deploy para recarregar o índice.
 
 ## Decisões técnicas
 
@@ -188,5 +188,3 @@ curl -X POST https://SEU-APP.up.railway.app/api/admin/reindexar -H "X-Admin-Toke
 - Notebooks são lidos como texto e código das células; as saídas (gráficos, prints) são ignoradas. Imagens do material não entram na busca.
 - SQLite com uma conexão por operação e limite de mensagens em memória (por processo): suficiente para um projeto de estudo, não para alta concorrência.
 - Sem autenticação de usuários: o limite por IP protege a chave, mas quem acessar a URL consegue conversar.
-# disruptive-rag-assistant
-# disruptive-rag-assistant

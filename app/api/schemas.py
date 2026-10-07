@@ -12,7 +12,6 @@ class HealthResponse(BaseModel):
     base_indexada: bool
     trechos: int
     indexando: bool
-    modo_geracao: str
     erro_ingestao: str = ""
 
 
@@ -61,6 +60,3 @@ class HistoricoResponse(BaseModel):
     sessao_id: str
     mensagens: list[dict]
 
-
-class ReindexacaoResponse(BaseModel):
-    status: str

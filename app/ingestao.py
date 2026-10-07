@@ -6,12 +6,21 @@ A fonte é o repositório do site (o fork no GitHub): o `docs_dir` do mkdocs.yml
   1. MATERIAL_DIR=/caminho/do/clone   -> usa a pasta local (rápido para desenvolver);
   2. sem MATERIAL_DIR                 -> baixa o zip do repositório (MATERIAL_REPO/BRANCH).
 
-Rode com:  python -m app.ingestao
+Rode com:  python -m app.ingestao            (indexa)
+           python -m app.ingestao --contar   (só conta quantos embeddings faltam, sem chamar a API)
 
 É retomável: cada trecho tem um hash (conteúdo + modelo de embedding). Trecho que já está
-no banco não é embutido de novo, e trecho que sumiu do material é removido do índice.
+no banco não é embutido de novo, e trecho que sumiu do material é removido do índice
+(só entre os arquivos dentro de MATERIAL_INCLUIR: o que está fora do filtro não é tocado).
+Se a cota da API acabar no meio, o que já foi indexado fica salvo e nada é removido: é só
+rodar de novo mais tarde (ou no dia seguinte, se for a cota diária).
+
+Filtros (variáveis de ambiente, separadas por vírgula):
+  MATERIAL_INCLUIR=aulas/genAI,aulas/checkpoint,agenda   só estes começos de caminho
+  MATERIAL_EXCLUIR=*copy.*,*cp-correcao*                 estes padrões ficam de fora
 """
 
+import fnmatch
 import hashlib
 import tempfile
 import urllib.request
@@ -22,7 +31,8 @@ from pathlib import Path
 
 from app import config
 from app.business import conhecimento
-from app.business.portas import Embedder
+from app.llm import embeddings
+from app.llm.client import CotaEsgotadaError
 from app.persistence import db
 
 PASTAS_IGNORADAS = {".git", "node_modules", "__pycache__", ".ipynb_checkpoints"}
@@ -58,9 +68,18 @@ def obter_pasta_do_material():
             raise FileNotFoundError(f"Pasta '{config.MATERIAL_SUBDIR}' nao existe no repositorio baixado.")
         yield pasta
 
+
+def deve_indexar(fonte: str) -> bool:
+    """Aplica MATERIAL_INCLUIR (começos de caminho) e MATERIAL_EXCLUIR (padrões com * e ?)."""
+    if config.MATERIAL_INCLUIR and not any(fonte.startswith(prefixo) for prefixo in config.MATERIAL_INCLUIR):
+        return False
+    return not any(fnmatch.fnmatch(fonte.lower(), padrao.lower()) for padrao in config.MATERIAL_EXCLUIR)
+
+
 def no_escopo(fonte: str) -> bool:
     """True se o arquivo está dentro de MATERIAL_INCLUIR (vazio = tudo). Só olha o INCLUIR, não o EXCLUIR."""
     return not config.MATERIAL_INCLUIR or any(fonte.startswith(prefixo) for prefixo in config.MATERIAL_INCLUIR)
+
 
 def listar_arquivos(pasta: Path) -> list[Path]:
     return sorted(
@@ -77,17 +96,19 @@ def hash_do_trecho(trecho) -> str:
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def executar(embedder: Embedder, progresso=print) -> dict:
+def executar(progresso=print) -> dict:
     """Atualiza o índice no banco. Retorna um resumo (arquivos, trechos, novos, removidos)."""
     db.inicializar_schema()
-    removidos = db.remover_trechos_exceto(hashes_atuais, no_escopo)
     ja_indexados = db.hashes_dos_trechos()
     hashes_atuais: set[str] = set()
-    arquivos_lidos = novos = 0
+    arquivos_lidos = novos = ignorados = 0
 
     with obter_pasta_do_material() as pasta:
         for arquivo in listar_arquivos(pasta):
             fonte = arquivo.relative_to(pasta).as_posix()
+            if not deve_indexar(fonte):
+                ignorados += 1
+                continue
             try:
                 trechos = conhecimento.segmentar_arquivo(
                     fonte, arquivo.read_text(encoding="utf-8"), config.SITE_URL
@@ -101,7 +122,15 @@ def executar(embedder: Embedder, progresso=print) -> dict:
                 hashes_atuais.add(h)
                 if h in ja_indexados:
                     continue
-                vetor = embedder.embutir_documento(trecho.secao, trecho.conteudo)
+                try:
+                    vetor = embeddings.embutir_documento(trecho.secao, trecho.conteudo)
+                except CotaEsgotadaError:
+                    progresso(
+                        f"\nCota da API esgotada em '{fonte}'. {novos} trechos novos ja estao salvos; "
+                        "nada foi removido. Rode o mesmo comando de novo mais tarde (ou amanha, se for a "
+                        "cota diaria): ele continua de onde parou."
+                    )
+                    raise
                 db.salvar_trecho(h, trecho, vetor)
                 novos += 1
             progresso(f"  {fonte}: {len(trechos)} trechos")
@@ -109,19 +138,60 @@ def executar(embedder: Embedder, progresso=print) -> dict:
     if not hashes_atuais:
         raise RuntimeError("Nenhum trecho gerado: o material esta vazio ou fora do formato esperado.")
 
-    removidos = db.remover_trechos_exceto(hashes_atuais)
+    removidos = db.remover_trechos_exceto(hashes_atuais, no_escopo)
     db.definir_metadado("indexado_em", datetime.now(timezone.utc).isoformat())
     resumo = {
         "arquivos": arquivos_lidos,
         "trechos": len(hashes_atuais),
         "novos": novos,
         "removidos": removidos,
+        "arquivos_ignorados_pelo_filtro": ignorados,
     }
     progresso(f"Indice atualizado: {resumo}")
     return resumo
 
 
-if __name__ == "__main__":
-    from app.llm.embeddings import GeminiEmbedder
+def contar_pendentes(progresso=print) -> dict:
+    """Quantos trechos o material tem (com os filtros) e quantos ainda precisam de embedding.
+    Não chama a API: serve para planejar a indexação dentro da cota."""
+    db.inicializar_schema()
+    ja_indexados = db.hashes_dos_trechos()
+    por_pasta: dict[str, list[int]] = {}
 
-    executar(GeminiEmbedder())
+    with obter_pasta_do_material() as pasta:
+        for arquivo in listar_arquivos(pasta):
+            fonte = arquivo.relative_to(pasta).as_posix()
+            if not deve_indexar(fonte):
+                continue
+            try:
+                trechos = conhecimento.segmentar_arquivo(
+                    fonte, arquivo.read_text(encoding="utf-8"), config.SITE_URL
+                )
+            except (ValueError, UnicodeDecodeError):
+                continue
+            partes = fonte.split("/")
+            grupo = "/".join(partes[:3]) if len(partes) > 3 else "/".join(partes[:-1]) or partes[0]
+            contagem = por_pasta.setdefault(grupo, [0, 0])
+            contagem[0] += len(trechos)
+            contagem[1] += sum(1 for t in trechos if hash_do_trecho(t) not in ja_indexados)
+
+    total = sum(c[0] for c in por_pasta.values())
+    faltam = sum(c[1] for c in por_pasta.values())
+    for grupo, (n_total, n_faltam) in sorted(por_pasta.items()):
+        progresso(f"  {grupo:<28} {n_total:>5} trechos  |  faltam {n_faltam:>5}")
+    progresso(f"Total: {total} trechos; faltam {faltam} embeddings (1 requisicao cada).")
+    return {"trechos": total, "faltam": faltam, "por_pasta": por_pasta}
+
+
+if __name__ == "__main__":
+    import sys
+
+    if "--contar" in sys.argv:
+        contar_pendentes()
+        sys.exit(0)
+
+    try:
+        executar()
+    except CotaEsgotadaError as erro:
+        print(f"Parou: {erro}")
+        sys.exit(1)

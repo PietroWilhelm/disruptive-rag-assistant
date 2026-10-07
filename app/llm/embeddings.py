@@ -1,4 +1,4 @@
-"""Embeddings com o Gemini (Lab 4): implementa a porta `Embedder` da camada de negócio.
+"""Embeddings com o Gemini (Lab 4).
 
 O prefixo do texto muda conforme o papel (pergunta x documento): é uma exigência
 do modelo `gemini-embedding-2`, por isso fica aqui e não na camada de negócio.
@@ -23,9 +23,9 @@ def gerar_embedding(texto: str) -> np.ndarray:
     return np.array(resultado.embeddings[0].values, dtype=float)
 
 
-class GeminiEmbedder:
-    def embutir_documento(self, titulo: str, conteudo: str) -> np.ndarray:
-        return gerar_embedding(preparar_documento(titulo, conteudo))
+def embutir_pergunta(pergunta: str) -> np.ndarray:
+    return gerar_embedding(preparar_pergunta(pergunta))
 
-    def embutir_pergunta(self, pergunta: str) -> np.ndarray:
-        return gerar_embedding(preparar_pergunta(pergunta))
+
+def embutir_documento(titulo: str, conteudo: str) -> np.ndarray:
+    return gerar_embedding(preparar_documento(titulo, conteudo))

@@ -28,7 +28,7 @@ def montar_consulta(pergunta: str, perguntas_anteriores: list[str]) -> str:
 
 def tem_contexto_suficiente(trechos: list[TrechoRecuperado], similaridade_minima: float) -> bool:
     """O cosseno ordena por relevância, mas não garante que o trecho responde (Lab 4).
-    Abaixo do limiar nem chamamos o gerador: devolvemos MENSAGEM_SEM_RESPOSTA."""
+    Abaixo do limiar nem chamamos o modelo: devolvemos MENSAGEM_SEM_RESPOSTA."""
     return bool(trechos) and trechos[0].similaridade >= similaridade_minima
 
 

@@ -2,14 +2,15 @@
 
 import hashlib
 import json
-import unicodedata
 import re
+import unicodedata
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from app.business.schemas import Geracao, TrechoRecuperado
 from app.api import limite
+from app.llm import assistente, embeddings
 
 DIMENSAO = 128
 
@@ -68,28 +69,46 @@ def vetor_falso(texto: str) -> np.ndarray:
     return v
 
 
-class EmbedderFalso:
+class IaFalsa:
+    """Substitui o Gemini nos testes: embeddings por hash de palavras e respostas que citam a 1ª fonte.
+
+    `texto` troca a resposta do modelo; `falhar_apos` faz o embedding de documento levantar o erro
+    dado depois de N chamadas (simula a cota acabando no meio da ingestão).
+    """
+
     def __init__(self):
         self.chamadas_documento = 0
+        self.chamadas = []                  # kwargs de cada geração
+        self.texto = None
+        self.falhar_apos = None
+        self.erro = None
 
     def embutir_documento(self, titulo, conteudo):
+        if self.falhar_apos is not None and self.chamadas_documento >= self.falhar_apos:
+            raise self.erro
         self.chamadas_documento += 1
         return vetor_falso(f"{titulo} {conteudo}")
 
     def embutir_pergunta(self, pergunta):
         return vetor_falso(pergunta)
 
+    def interagir(self, **kwargs):
+        self.chamadas.append(kwargs)
+        if isinstance(self.erro, Exception) and self.falhar_apos is None:
+            raise self.erro
+        fonte = re.search(r"FONTE: \[([^\]]+)\]", kwargs["input"]).group(1)
+        texto = self.texto if self.texto is not None else f"Resposta de teste. [{fonte}]"
+        return SimpleNamespace(output_text=texto, id=f"estado-{len(self.chamadas)}")
 
-class GeradorFalso:
-    """Cita a fonte do primeiro trecho, como o modelo deveria fazer."""
 
-    def __init__(self):
-        self.chamadas = []
-
-    def gerar(self, pergunta, trechos: list[TrechoRecuperado], estado):
-        self.chamadas.append((pergunta, estado))
-        fonte = trechos[0].trecho.fonte
-        return Geracao(texto=f"Resposta de teste. [{fonte}]", estado=f"estado-{len(self.chamadas)}")
+@pytest.fixture()
+def ia(monkeypatch):
+    """Troca as chamadas ao Gemini (embeddings e geração) por fakes. Nenhum teste usa rede ou chave."""
+    falsa = IaFalsa()
+    monkeypatch.setattr(embeddings, "embutir_documento", falsa.embutir_documento)
+    monkeypatch.setattr(embeddings, "embutir_pergunta", falsa.embutir_pergunta)
+    monkeypatch.setattr(assistente, "interagir_com_retry", falsa.interagir)
+    return falsa
 
 
 @pytest.fixture()

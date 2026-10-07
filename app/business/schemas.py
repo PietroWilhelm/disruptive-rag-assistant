@@ -36,17 +36,6 @@ class TrechoRecuperado(BaseModel):
     similaridade: float
 
 
-class Geracao(BaseModel):
-    """Resultado de um gerador de respostas (qualquer um: Gemini, outro LLM ou nenhum).
-
-    `estado` é um valor opaco que o gerador devolve para continuar a conversa
-    (no Gemini é o `interaction_id`). A camada de negócio nunca interpreta esse valor.
-    """
-
-    texto: str
-    estado: str | None = None
-
-
 class FonteCitada(BaseModel):
     fonte: str
     titulo: str

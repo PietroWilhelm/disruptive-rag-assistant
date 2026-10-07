@@ -28,13 +28,17 @@ def _numero(nome: str, padrao: float) -> float:
         return padrao
 
 
+def _lista(valor: str) -> list[str]:
+    return [item.strip() for item in valor.split(",") if item.strip()]
+
+
 def _verdadeiro(nome: str, padrao: bool) -> bool:
     return _texto(nome, str(padrao)).lower() in {"1", "true", "sim", "yes", "on"}
 
 
 # --- Gemini (modelos usados nos Labs 3 e 4) ---
 GEMINI_API_KEY = _texto("GEMINI_API_KEY", "")
-GEMINI_MODEL = _texto("GEMINI_MODEL", "gemini-3.5-flash-lite")
+GEMINI_MODEL = _texto("GEMINI_MODEL", "gemini-3.5-flash")
 EMBEDDING_MODEL = _texto("EMBEDDING_MODEL", "gemini-embedding-2")
 
 # --- Banco SQLite (sessões, mensagens e índice de trechos) ---
@@ -47,14 +51,19 @@ MATERIAL_BRANCH = _texto("MATERIAL_BRANCH", "master")
 MATERIAL_SUBDIR = _texto("MATERIAL_SUBDIR", "material")  # docs_dir do mkdocs.yml
 MATERIAL_DIR = _texto("MATERIAL_DIR", "")                # pasta local já clonada (opcional)
 MATERIAL_ZIP_URL = _texto("MATERIAL_ZIP_URL", "")        # sobrescreve a URL do zip (opcional)
+# Filtros da indexação (separados por vírgula). INCLUIR: começos de caminho, vazio = tudo.
+# EXCLUIR: padrões (* e ?) comparados com o caminho em minúsculas; o padrão ignora cópias "x copy.md".
+MATERIAL_INCLUIR = _lista(_texto("MATERIAL_INCLUIR", ""))
+MATERIAL_EXCLUIR = _lista(_texto("MATERIAL_EXCLUIR", "*copy.*"))
+
+# Ritmo máximo de chamadas de embedding por minuto (camada gratuita: 100). 0 desliga o controle.
+EMBEDDING_RPM = int(_numero("EMBEDDING_RPM", 80))
 
 # --- Recuperação ---
 TOP_K = int(_numero("TOP_K", 4))
 SIMILARIDADE_MINIMA = _numero("SIMILARIDADE_MINIMA", 0.40)
-MODO_GERACAO = _texto("MODO_GERACAO", "gemini").lower()  # "gemini" ou "extrativo" (sem IA)
 
 # --- Operação ---
-ADMIN_TOKEN = _texto("ADMIN_TOKEN", "")
 AUTO_INGESTAO = _verdadeiro("AUTO_INGESTAO", True)
 LIMITE_MENSAGENS_POR_MINUTO = int(_numero("LIMITE_MENSAGENS_POR_MINUTO", 20))
 

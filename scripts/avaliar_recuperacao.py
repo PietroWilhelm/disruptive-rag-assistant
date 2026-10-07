@@ -18,9 +18,8 @@ import statistics
 from pathlib import Path
 
 from app import config
-from app.business import rag
-from app.llm.assistente import GeminiGerador
-from app.llm.embeddings import GeminiEmbedder
+from app.llm import assistente
+from app.llm.client import CotaEsgotadaError
 from app.persistence import db
 
 ARQUIVO = Path(__file__).resolve().parent.parent / "avaliacao" / "perguntas.json"
@@ -33,12 +32,12 @@ def main(com_respostas: bool) -> None:
         raise SystemExit("Indice vazio. Rode antes: python -m app.ingestao")
 
     perguntas = json.loads(ARQUIVO.read_text(encoding="utf-8"))
-    embedder, gerador, k = GeminiEmbedder(), GeminiGerador(), config.TOP_K
+    k = config.TOP_K
 
     acertos, reciprocos, melhores = 0, [], []
     print(f"\n=== Recuperacao (k={k}) ===")
     for item in perguntas["dentro_do_escopo"]:
-        _, trechos = rag.recuperar(item["pergunta"], [], indice, embedder, k)
+        _, trechos = assistente.recuperar(item["pergunta"], [], indice, k)
         posicao = next(
             (i for i, t in enumerate(trechos, start=1)
              if any(esperada in t.trecho.fonte for esperada in item["fontes_esperadas"])),
@@ -58,7 +57,7 @@ def main(com_respostas: bool) -> None:
     print("\n=== Fora do escopo (a similaridade deveria ser baixa) ===")
     fora = []
     for pergunta in perguntas["fora_do_escopo"]:
-        _, trechos = rag.recuperar(pergunta, [], indice, embedder, 1)
+        _, trechos = assistente.recuperar(pergunta, [], indice, 1)
         fora.append(trechos[0].similaridade)
         print(f"  sim={trechos[0].similaridade:.3f}  {pergunta}")
 
@@ -71,16 +70,19 @@ def main(com_respostas: bool) -> None:
     if com_respostas:
         print("\n=== Respostas (confere citacoes e recusa) ===")
         for item in perguntas["dentro_do_escopo"]:
-            r = rag.responder(item["pergunta"], [], indice, embedder, gerador, None, k, config.SIMILARIDADE_MINIMA)
+            r = assistente.conversar(item["pergunta"], [], indice)
             citou = any(f.citada for f in r.fontes)
             print(f"  fundamentada={r.fundamentada!s:<5} citou_fonte={citou!s:<5} "
                   f"citacoes_invalidas={r.citacoes_invalidas}  {item['pergunta']}")
         for pergunta in perguntas["fora_do_escopo"]:
-            r = rag.responder(pergunta, [], indice, embedder, gerador, None, k, config.SIMILARIDADE_MINIMA)
+            r = assistente.conversar(pergunta, [], indice)
             print(f"  recusou={not r.fundamentada or r.texto.startswith('Não encontrei')!s:<5}  {pergunta}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--respostas", action="store_true")
-    main(parser.parse_args().respostas)
+    try:
+        main(parser.parse_args().respostas)
+    except CotaEsgotadaError as erro:
+        raise SystemExit(f"\nParou: {erro}")

@@ -1,28 +1,22 @@
-"""Testes da API com as portas trocadas por fakes — nenhum teste usa o Gemini nem GEMINI_API_KEY."""
+"""Testes da API com o Gemini trocado por fakes (fixture `ia`) — nenhum teste usa a rede nem GEMINI_API_KEY."""
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import config, ingestao
-from app.api import dependencias, indexacao
+from app.llm.client import CotaEsgotadaError
 from app.main import app
-from tests.conftest import EmbedderFalso, GeradorFalso
 
 
 @pytest.fixture()
-def cliente(banco, material, monkeypatch):
+def cliente(ia, banco, material, monkeypatch):
     monkeypatch.setattr(config, "MATERIAL_DIR", str(material))
     monkeypatch.setattr(config, "AUTO_INGESTAO", False)
     monkeypatch.setattr(config, "SIMILARIDADE_MINIMA", 0.15)
-    ingestao.executar(EmbedderFalso(), progresso=lambda *_: None)
-
-    gerador = GeradorFalso()
-    app.dependency_overrides[dependencias.obter_embedder] = lambda: EmbedderFalso()
-    app.dependency_overrides[dependencias.obter_gerador] = lambda: gerador
+    ingestao.executar(progresso=lambda *_: None)
     with TestClient(app) as c:
-        c.gerador = gerador
+        c.ia = ia
         yield c
-    app.dependency_overrides.clear()
 
 
 def _sessao(c):
@@ -32,7 +26,6 @@ def _sessao(c):
 def test_health_mostra_base_indexada(cliente):
     corpo = cliente.get("/api/health").json()
     assert corpo["status"] == "ok" and corpo["base_indexada"] and corpo["trechos"] > 3
-    assert corpo["modo_geracao"] == "gemini"
 
 
 def test_frontend_e_servido_na_raiz(cliente):
@@ -64,7 +57,7 @@ def test_memoria_da_conversa_encadeia_o_estado(cliente):
     sessao = _sessao(cliente)
     cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "O que é similaridade de cosseno?"})
     cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "E os embeddings?"})
-    estados_recebidos = [estado for _, estado in cliente.gerador.chamadas]
+    estados_recebidos = [c["previous_interaction_id"] for c in cliente.ia.chamadas]
     assert estados_recebidos == [None, "estado-1"]
 
 
@@ -74,14 +67,14 @@ def test_fora_de_escopo_responde_sem_gerar(cliente, monkeypatch):
     corpo = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "receita de bolo de cenoura"}).json()
     assert corpo["fundamentada"] is False and corpo["fontes"] == []
     assert corpo["resposta"] == "Não encontrei essa informação no material da disciplina."
-    assert cliente.gerador.chamadas == []
+    assert cliente.ia.chamadas == []
 
 
 def test_busca_sem_geracao(cliente):
     corpo = cliente.post("/api/buscar", json={"pergunta": "previous_interaction_id", "k": 2}).json()
     assert len(corpo["trechos"]) == 2
     assert corpo["trechos"][0]["fonte"] == "aulas/genAI/lab2/lab2.md"
-    assert cliente.gerador.chamadas == []
+    assert cliente.ia.chamadas == []
 
 
 def test_validacao_da_mensagem(cliente):
@@ -100,36 +93,16 @@ def test_limite_de_mensagens_por_minuto(cliente, monkeypatch):
     assert codigos == [200, 200, 429]
 
 
-def test_503_quando_a_base_esta_vazia(banco, monkeypatch):
+def test_503_quando_a_base_esta_vazia(ia, banco, monkeypatch):
     monkeypatch.setattr(config, "AUTO_INGESTAO", False)
-    app.dependency_overrides[dependencias.obter_embedder] = lambda: EmbedderFalso()
-    app.dependency_overrides[dependencias.obter_gerador] = lambda: GeradorFalso()
-    try:
-        with TestClient(app) as c:
-            assert c.get("/api/health").json()["base_indexada"] is False
-            sessao = c.post("/api/sessoes").json()["sessao_id"]
-            assert c.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "similaridade de cosseno"}).status_code == 503
-    finally:
-        app.dependency_overrides.clear()
+    with TestClient(app) as c:
+        assert c.get("/api/health").json()["base_indexada"] is False
+        sessao = c.post("/api/sessoes").json()["sessao_id"]
+        assert c.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "similaridade de cosseno"}).status_code == 503
 
 
-def test_modo_extrativo_funciona_sem_nenhum_llm(cliente, monkeypatch):
-    app.dependency_overrides.pop(dependencias.obter_gerador)    # volta a escolher pela configuração
-    monkeypatch.setattr(config, "MODO_GERACAO", "extrativo")
+def test_cota_esgotada_vira_429_amigavel(cliente):
+    cliente.ia.erro = CotaEsgotadaError("A cota DIARIA da API do Gemini acabou")
     sessao = _sessao(cliente)
-    corpo = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "previous_interaction_id mantém contexto"}).json()
-    assert "Encontrei isto no material" in corpo["resposta"]
-    assert corpo["fontes"][0]["citada"]
-
-
-def test_admin_reindexar_exige_token(cliente, monkeypatch):
-    monkeypatch.setattr(config, "ADMIN_TOKEN", "segredo")
-    assert cliente.post("/api/admin/reindexar").status_code == 403
-    assert cliente.post("/api/admin/reindexar", headers={"X-Admin-Token": "errado"}).status_code == 403
-    disparos = []
-    monkeypatch.setattr(indexacao, "iniciar_reindexacao", lambda a: disparos.append(a) or True)
-    r = cliente.post("/api/admin/reindexar", headers={"X-Admin-Token": "segredo"})
-    assert r.status_code == 202 and len(disparos) == 1
-
-    monkeypatch.setattr(indexacao, "iniciar_reindexacao", lambda a: False)
-    assert cliente.post("/api/admin/reindexar", headers={"X-Admin-Token": "segredo"}).status_code == 409
+    r = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "similaridade de cosseno"})
+    assert r.status_code == 429 and "cota" in r.json()["detail"].lower()
