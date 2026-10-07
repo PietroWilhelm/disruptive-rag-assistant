@@ -2,6 +2,9 @@
 
 Chat que responde dúvidas da disciplina **usando só o material do site** (`arnaldojr.github.io/DisruptiveArchitectures`), sempre mostrando de onde veio cada informação. É a aplicação "fora do notebook" (Lab 3.5) do que foi visto nos Labs 1 a 4: engenharia de prompt, conversa com a Interactions API, saídas estruturadas com Pydantic e **RAG** (embeddings + similaridade de cosseno).
 
+## Link do deploy 
+- https://disruptive-rag-assistant.onrender.com/
+
 ## O que o assistente faz
 
 1. Lê os arquivos do material (`.md` e `.ipynb` do repositório do site) e quebra cada um em trechos, um por seção.
@@ -165,7 +168,7 @@ O `gemini-embedding-2` gratuito permite 100 requisições por minuto e 1.000 por
 - `MATERIAL_INCLUIR` e `MATERIAL_EXCLUIR` limitam o que é indexado (ex.: `MATERIAL_INCLUIR=agenda,aulas/genAI,aulas/checkpoint`). Cópias como `x copy.md` já são ignoradas por padrão;
 - cada pergunta no chat gasta 1 embedding e 1 geração, então confira também os limites do modelo `gemini-3.5-flash` no AI Studio antes de divulgar o chat; para uso real, ative o faturamento.
 
-## Deploy no Railway
+## Deploy no render
 
 A indexação gasta uma requisição de embedding por trecho (mais de 1.500 no site inteiro), mais do que a cota diária gratuita. Por isso o índice pronto vai junto com o código, em `seed/indice.db`, e o app o usa quando o banco está vazio: o deploy não reindexa nada.
 
@@ -177,7 +180,7 @@ python -m scripts.criar_semente
 
    Ele grava `seed/indice.db` com só os trechos e embeddings (sem sessões nem mensagens). Commite esse arquivo. Refaça e commite sempre que o site mudar e você reindexar.
 2. Suba o projeto para o seu repositório no GitHub (o `.env` e `data/*.db` já estão no `.gitignore`).
-3. No Railway: **New Project → Deploy from GitHub repo**. Ele usa o `Dockerfile` e o `railway.json` (healthcheck em `/api/health`).
+3. No render: **New Project → Deploy from GitHub repo**. Ele usa o `Dockerfile` e o(healthcheck em `/api/health`).
 4. Em **Variables**, defina `GEMINI_API_KEY`, `AUTO_INGESTAO=false` (evita gastar cota se algo der errado com a semente), `SIMILARIDADE_MINIMA` com o valor que você calibrou e, se quiser, `GEMINI_MODEL`. Para outro fork/branch, `MATERIAL_REPO` e `MATERIAL_BRANCH`.
 5. **Settings → Networking → Generate Domain**.
 6. Abra `/api/health`: `trechos` deve mostrar o total do índice. Na primeira subida o app copia a semente para o banco.
