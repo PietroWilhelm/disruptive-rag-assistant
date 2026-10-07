@@ -1,0 +1,15 @@
+# segredos
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# banco local (sessões + índice) — é gerado por `python -m app.ingestao`
+data/*.db
+data/*.db-journal
+
+# sistema
+.DS_Store

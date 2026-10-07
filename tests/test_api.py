@@ -1,0 +1,135 @@
+"""Testes da API com as portas trocadas por fakes — nenhum teste usa o Gemini nem GEMINI_API_KEY."""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import config, ingestao
+from app.api import dependencias, indexacao
+from app.main import app
+from tests.conftest import EmbedderFalso, GeradorFalso
+
+
+@pytest.fixture()
+def cliente(banco, material, monkeypatch):
+    monkeypatch.setattr(config, "MATERIAL_DIR", str(material))
+    monkeypatch.setattr(config, "AUTO_INGESTAO", False)
+    monkeypatch.setattr(config, "SIMILARIDADE_MINIMA", 0.15)
+    ingestao.executar(EmbedderFalso(), progresso=lambda *_: None)
+
+    gerador = GeradorFalso()
+    app.dependency_overrides[dependencias.obter_embedder] = lambda: EmbedderFalso()
+    app.dependency_overrides[dependencias.obter_gerador] = lambda: gerador
+    with TestClient(app) as c:
+        c.gerador = gerador
+        yield c
+    app.dependency_overrides.clear()
+
+
+def _sessao(c):
+    return c.post("/api/sessoes").json()["sessao_id"]
+
+
+def test_health_mostra_base_indexada(cliente):
+    corpo = cliente.get("/api/health").json()
+    assert corpo["status"] == "ok" and corpo["base_indexada"] and corpo["trechos"] > 3
+    assert corpo["modo_geracao"] == "gemini"
+
+
+def test_frontend_e_servido_na_raiz(cliente):
+    resposta = cliente.get("/")
+    assert resposta.status_code == 200 and "Assistente" in resposta.text
+
+
+def test_criar_sessao_e_404(cliente):
+    assert cliente.post("/api/sessoes").status_code == 201
+    assert cliente.get("/api/sessoes/nao-existe").status_code == 404
+    assert cliente.post("/api/sessoes/nao-existe/mensagens", json={"mensagem": "oi tudo bem"}).status_code == 404
+
+
+def test_pergunta_com_fontes_e_historico(cliente):
+    sessao = _sessao(cliente)
+    r = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "O que é similaridade de cosseno?"})
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["fundamentada"] and corpo["resposta"].startswith("Resposta de teste.")
+    assert corpo["fontes"][0]["fonte"] == "aulas/genAI/lab4/lab4.md" and corpo["fontes"][0]["citada"]
+    assert corpo["fontes"][0]["url"].endswith("/aulas/genAI/lab4/lab4/#similaridade-de-cosseno")
+
+    historico = cliente.get(f"/api/sessoes/{sessao}").json()
+    assert [m["remetente"] for m in historico["mensagens"]] == ["aluno", "assistente"]
+    assert historico["mensagens"][1]["fontes"][0]["citada"] is True
+
+
+def test_memoria_da_conversa_encadeia_o_estado(cliente):
+    sessao = _sessao(cliente)
+    cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "O que é similaridade de cosseno?"})
+    cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "E os embeddings?"})
+    estados_recebidos = [estado for _, estado in cliente.gerador.chamadas]
+    assert estados_recebidos == [None, "estado-1"]
+
+
+def test_fora_de_escopo_responde_sem_gerar(cliente, monkeypatch):
+    monkeypatch.setattr(config, "SIMILARIDADE_MINIMA", 0.95)
+    sessao = _sessao(cliente)
+    corpo = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "receita de bolo de cenoura"}).json()
+    assert corpo["fundamentada"] is False and corpo["fontes"] == []
+    assert corpo["resposta"] == "Não encontrei essa informação no material da disciplina."
+    assert cliente.gerador.chamadas == []
+
+
+def test_busca_sem_geracao(cliente):
+    corpo = cliente.post("/api/buscar", json={"pergunta": "previous_interaction_id", "k": 2}).json()
+    assert len(corpo["trechos"]) == 2
+    assert corpo["trechos"][0]["fonte"] == "aulas/genAI/lab2/lab2.md"
+    assert cliente.gerador.chamadas == []
+
+
+def test_validacao_da_mensagem(cliente):
+    sessao = _sessao(cliente)
+    assert cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "x"}).status_code == 422
+    assert cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "a" * 801}).status_code == 422
+
+
+def test_limite_de_mensagens_por_minuto(cliente, monkeypatch):
+    monkeypatch.setattr(config, "LIMITE_MENSAGENS_POR_MINUTO", 2)
+    sessao = _sessao(cliente)
+    codigos = [
+        cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "similaridade de cosseno"}).status_code
+        for _ in range(3)
+    ]
+    assert codigos == [200, 200, 429]
+
+
+def test_503_quando_a_base_esta_vazia(banco, monkeypatch):
+    monkeypatch.setattr(config, "AUTO_INGESTAO", False)
+    app.dependency_overrides[dependencias.obter_embedder] = lambda: EmbedderFalso()
+    app.dependency_overrides[dependencias.obter_gerador] = lambda: GeradorFalso()
+    try:
+        with TestClient(app) as c:
+            assert c.get("/api/health").json()["base_indexada"] is False
+            sessao = c.post("/api/sessoes").json()["sessao_id"]
+            assert c.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "similaridade de cosseno"}).status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_modo_extrativo_funciona_sem_nenhum_llm(cliente, monkeypatch):
+    app.dependency_overrides.pop(dependencias.obter_gerador)    # volta a escolher pela configuração
+    monkeypatch.setattr(config, "MODO_GERACAO", "extrativo")
+    sessao = _sessao(cliente)
+    corpo = cliente.post(f"/api/sessoes/{sessao}/mensagens", json={"mensagem": "previous_interaction_id mantém contexto"}).json()
+    assert "Encontrei isto no material" in corpo["resposta"]
+    assert corpo["fontes"][0]["citada"]
+
+
+def test_admin_reindexar_exige_token(cliente, monkeypatch):
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "segredo")
+    assert cliente.post("/api/admin/reindexar").status_code == 403
+    assert cliente.post("/api/admin/reindexar", headers={"X-Admin-Token": "errado"}).status_code == 403
+    disparos = []
+    monkeypatch.setattr(indexacao, "iniciar_reindexacao", lambda a: disparos.append(a) or True)
+    r = cliente.post("/api/admin/reindexar", headers={"X-Admin-Token": "segredo"})
+    assert r.status_code == 202 and len(disparos) == 1
+
+    monkeypatch.setattr(indexacao, "iniciar_reindexacao", lambda a: False)
+    assert cliente.post("/api/admin/reindexar", headers={"X-Admin-Token": "segredo"}).status_code == 409

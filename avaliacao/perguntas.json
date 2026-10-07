@@ -1,0 +1,20 @@
+{
+  "dentro_do_escopo": [
+    {"pergunta": "O que é o previous_interaction_id e para que serve?", "fontes_esperadas": ["genAI/lab2"]},
+    {"pergunta": "Qual a diferença entre System Prompt e User Prompt?", "fontes_esperadas": ["genAI/lab2"]},
+    {"pergunta": "Quais são os cinco componentes de um prompt profissional?", "fontes_esperadas": ["genAI/lab1"]},
+    {"pergunta": "O que é few-shot e quando usar?", "fontes_esperadas": ["genAI/lab1"]},
+    {"pergunta": "Como funciona o function calling e quem executa a função?", "fontes_esperadas": ["genAI/lab3"]},
+    {"pergunta": "Como gerar uma saída estruturada validada com Pydantic?", "fontes_esperadas": ["genAI/lab3"]},
+    {"pergunta": "O que é similaridade de cosseno no RAG?", "fontes_esperadas": ["genAI/lab4"]},
+    {"pergunta": "Qual a diferença entre memória da conversa e base de conhecimento?", "fontes_esperadas": ["genAI/lab4"]},
+    {"pergunta": "O que o README do Lab 3.5 precisa ter?", "fontes_esperadas": ["genAI/lab3_5"]},
+    {"pergunta": "Qual o guardrail do assistente do pet shop?", "fontes_esperadas": ["genAI/avaliacao"]},
+    {"pergunta": "Quanto custa banho para um cão de porte médio no checkpoint do pet shop?", "fontes_esperadas": ["genAI/avaliacao"]}
+  ],
+  "fora_do_escopo": [
+    "Qual a receita de bolo de cenoura?",
+    "Quem ganhou a Copa do Mundo de 2014?",
+    "Escreva um poema sobre o mar"
+  ]
+}

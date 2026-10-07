@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="pt-br">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Assistente — Disruptive Architectures</title>
+  <style>
+    :root {
+      --bg: #f5f4f8;
+      --card: #ffffff;
+      --texto: #231f2e;
+      --muted: #6f6a7d;
+      --primaria: #5b3fc4;
+      --primaria-escura: #46309c;
+      --borda: #e1def0;
+      --aluno-bg: #5b3fc4;
+      --assistente-bg: #efedf7;
+      --erro: #c0392b;
+      --codigo: #1f1b2e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--texto);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 760px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    header h1 {
+      font-size: 1.3rem;
+      margin: 0 0 4px;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--borda);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    #status {
+      font-size: 0.8rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #chat {
+      height: 58vh;
+      min-height: 320px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-right: 4px;
+    }
+
+    .msg {
+      max-width: 88%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .msg p {
+      margin: 0 0 8px;
+      white-space: pre-wrap;
+    }
+
+    .msg p:last-child {
+      margin-bottom: 0;
+    }
+
+    .msg.aluno {
+      align-self: flex-end;
+      background: var(--aluno-bg);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg.assistente {
+      align-self: flex-start;
+      background: var(--assistente-bg);
+      border-bottom-left-radius: 4px;
+    }
+
+    .msg.sistema {
+      align-self: center;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-style: italic;
+      max-width: 100%;
+    }
+
+    .msg pre {
+      margin: 6px 0;
+      padding: 10px 12px;
+      background: var(--codigo);
+      color: #eae7f8;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.8rem;
+    }
+
+    .fontes {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--borda);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .fontes a {
+      display: block;
+      color: var(--primaria-escura);
+      text-decoration: none;
+      margin-top: 3px;
+    }
+
+    .fontes a:hover {
+      text-decoration: underline;
+    }
+
+    .fontes .citada::before {
+      content: "● ";
+      color: var(--primaria);
+    }
+
+    .fontes .nao-citada::before {
+      content: "○ ";
+    }
+
+    .msg.digitando {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 12px 16px;
+    }
+
+    .msg.digitando .ponto {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      opacity: 0.3;
+      animation: piscar-ponto 1.2s infinite ease-in-out;
+    }
+
+    .msg.digitando .ponto:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .msg.digitando .ponto:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes piscar-ponto {
+
+      0%,
+      80%,
+      100% {
+        opacity: 0.3;
+        transform: translateY(0);
+      }
+
+      40% {
+        opacity: 1;
+        transform: translateY(-3px);
+      }
+    }
+
+    .sugestoes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    form#form-mensagem {
+      display: flex;
+      gap: 8px;
+    }
+
+    input,
+    button {
+      font: inherit;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--borda);
+      min-width: 0;
+    }
+
+    button {
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: none;
+      background: var(--primaria);
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--primaria-escura);
+    }
+
+    button:disabled {
+      background: #b5aedb;
+      cursor: not-allowed;
+    }
+
+    button.secundario {
+      background: transparent;
+      color: var(--primaria-escura);
+      border: 1px solid var(--primaria);
+      padding: 6px 12px;
+      font-size: 0.82rem;
+    }
+
+    button.secundario:hover {
+      background: #efecfb;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header>
+      <h1>Assistente de Disruptive Architectures</h1>
+      <p>Responde com base no material do site da disciplina e mostra as fontes usadas.</p>
+    </header>
+
+    <div class="card">
+      <div id="status">
+        <span id="base-info">Verificando a base...</span>
+        <button type="button" class="secundario" id="botao-nova-sessao">Nova conversa</button>
+      </div>
+    </div>
+
+    <div class="card" id="chat"></div>
+
+    <div class="sugestoes" id="sugestoes"></div>
+
+    <form id="form-mensagem" class="card" style="padding: 10px;">
+      <input type="text" id="campo-mensagem" maxlength="800" placeholder="Pergunte sobre a disciplina..." autocomplete="off" />
+      <button type="submit" id="botao-enviar">Enviar</button>
+    </form>
+  </div>
+
+  <script>
+    const API_BASE = "/api";
+    const SUGESTOES = [
+      "O que é previous_interaction_id?",
+      "Como funciona o RAG com embeddings?",
+      "Quais são os 5 componentes de um bom prompt?",
+      "O que o Checkpoint 4 do pet shop pede?",
+    ];
+
+    let sessaoId = null;
+
+    const chatEl = document.getElementById("chat");
+    const baseInfoEl = document.getElementById("base-info");
+    const sugestoesEl = document.getElementById("sugestoes");
+    const formEl = document.getElementById("form-mensagem");
+    const campoEl = document.getElementById("campo-mensagem");
+    const botaoEnviarEl = document.getElementById("botao-enviar");
+    const botaoNovaSessaoEl = document.getElementById("botao-nova-sessao");
+
+    // Renderização segura: só textContent / createElement, nunca innerHTML com texto do modelo.
+    function renderizarTexto(container, texto) {
+      const partes = texto.split("```");
+      partes.forEach((parte, i) => {
+        if (i % 2 === 1) {
+          const pre = document.createElement("pre");
+          const code = document.createElement("code");
+          code.textContent = parte.replace(/^[a-zA-Z0-9+#-]*\n/, "").replace(/\n$/, "");
+          pre.appendChild(code);
+          container.appendChild(pre);
+        } else if (parte.trim()) {
+          parte.trim().split(/\n{2,}/).forEach((paragrafo) => {
+            const p = document.createElement("p");
+            p.textContent = paragrafo;
+            container.appendChild(p);
+          });
+        }
+      });
+    }
+
+    function rolar() {
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    function adicionarMensagem(remetente, texto, fontes) {
+      const bolha = document.createElement("div");
+      bolha.className = `msg ${remetente}`;
+      renderizarTexto(bolha, texto);
+      if (fontes && fontes.length) {
+        const bloco = document.createElement("div");
+        bloco.className = "fontes";
+        bloco.append("Fontes consultadas (● citada na resposta):");
+        fontes.forEach((f) => {
+          const link = document.createElement("a");
+          link.href = f.url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.className = f.citada ? "citada" : "nao-citada";
+          link.textContent = `${f.secao} — similaridade ${f.similaridade.toFixed(2)}`;
+          link.title = f.fonte;
+          bloco.appendChild(link);
+        });
+        bolha.appendChild(bloco);
+      }
+      chatEl.appendChild(bolha);
+      rolar();
+    }
+
+    function mostrarDigitando() {
+      const bolha = document.createElement("div");
+      bolha.className = "msg assistente digitando";
+      for (let i = 0; i < 3; i++) {
+        const ponto = document.createElement("span");
+        ponto.className = "ponto";
+        bolha.appendChild(ponto);
+      }
+      chatEl.appendChild(bolha);
+      rolar();
+      return bolha;
+    }
+
+    async function carregarStatus() {
+      try {
+        const resp = await fetch(`${API_BASE}/health`);
+        const d = await resp.json();
+        if (d.indexando) baseInfoEl.textContent = "Indexando o material da disciplina... aguarde.";
+        else if (!d.base_indexada) baseInfoEl.textContent = "Base ainda não indexada." + (d.erro_ingestao ? ` Erro: ${d.erro_ingestao}` : "");
+        else baseInfoEl.textContent = `${d.trechos} trechos do material indexados`;
+      } catch (e) {
+        baseInfoEl.textContent = "API indisponível.";
+      }
+    }
+
+    async function criarSessao() {
+      const resp = await fetch(`${API_BASE}/sessoes`, { method: "POST" });
+      if (!resp.ok) {
+        adicionarMensagem("sistema", "Falha ao criar a sessão.");
+        return;
+      }
+      sessaoId = (await resp.json()).sessao_id;
+      chatEl.innerHTML = "";
+      adicionarMensagem("sistema", "Nova conversa iniciada. Pergunte sobre o material da disciplina.");
+      carregarStatus();
+    }
+
+    async function enviarMensagem(mensagem) {
+      adicionarMensagem("aluno", mensagem);
+      botaoEnviarEl.disabled = true;
+      const indicador = mostrarDigitando();
+      try {
+        const resp = await fetch(`${API_BASE}/sessoes/${sessaoId}/mensagens`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mensagem }),
+        });
+        const dados = await resp.json();
+        indicador.remove();
+        if (!resp.ok) {
+          const detalhe = Array.isArray(dados.detail) ? "mensagem inválida" : dados.detail;
+          adicionarMensagem("sistema", `Erro (${resp.status}): ${detalhe ?? "erro desconhecido"}`);
+          return;
+        }
+        adicionarMensagem("assistente", dados.resposta, dados.fontes);
+      } catch (erro) {
+        indicador.remove();
+        adicionarMensagem("sistema", `Erro de rede: ${erro}`);
+      } finally {
+        botaoEnviarEl.disabled = false;
+        campoEl.focus();
+      }
+    }
+
+    function enviar(texto) {
+      texto = texto.trim();
+      if (!texto || !sessaoId) return;
+      sugestoesEl.style.display = "none";
+      campoEl.value = "";
+      enviarMensagem(texto);
+    }
+
+    SUGESTOES.forEach((texto) => {
+      const botao = document.createElement("button");
+      botao.type = "button";
+      botao.className = "secundario";
+      botao.textContent = texto;
+      botao.addEventListener("click", () => enviar(texto));
+      sugestoesEl.appendChild(botao);
+    });
+
+    formEl.addEventListener("submit", (evento) => {
+      evento.preventDefault();
+      enviar(campoEl.value);
+    });
+
+    botaoNovaSessaoEl.addEventListener("click", () => {
+      sugestoesEl.style.display = "flex";
+      criarSessao();
+    });
+
+    criarSessao();
+  </script>
+</body>
+
+</html>
