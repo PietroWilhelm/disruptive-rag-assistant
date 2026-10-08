@@ -2,6 +2,12 @@
 
 Chat que responde dúvidas da disciplina **usando só o material do site** (`arnaldojr.github.io/DisruptiveArchitectures`), sempre mostrando de onde veio cada informação. É a aplicação "fora do notebook" (Lab 3.5) do que foi visto nos Labs 1 a 4: engenharia de prompt, conversa com a Interactions API, saídas estruturadas com Pydantic e **RAG** (embeddings + similaridade de cosseno).
 
+## Membros 
+- Pietro Paranhos Wilhelm RM561378
+- João Vitor Biribilli RM565594
+- Gabriel Neris Losano RM564093
+
+
 ## Link do deploy 
 - https://disruptive-rag-assistant.onrender.com/
 
