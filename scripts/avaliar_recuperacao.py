@@ -8,8 +8,6 @@ O que mede:
   - MRR       : quão no topo o primeiro trecho esperado aparece;
   - similaridade: das perguntas do escopo x fora do escopo, para escolher SIMILARIDADE_MINIMA.
 
-Edite avaliacao/perguntas.json com perguntas reais da disciplina ("fontes_esperadas" é um
-pedaço do caminho do arquivo, ex.: "genAI/lab4").
 """
 
 import argparse
